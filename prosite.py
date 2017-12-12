@@ -1,59 +1,114 @@
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    
-def isNaN(num):
-    return num != num
+def parseParam(paramString):
+    st = paramString.index('(') + 1
+    end = paramString.index(')')
+    params = paramString[st:end].split(',')
+    atMin = int(params[0])
+    if len(params) == 1:
+        return atMin, atMin
+    else:
+        atMax = int(params[1])
+        return atMin, atMax
 
-class PrositeMatcher:        
-    def __init__(self, pattern):
-        def matcher(lt):
-            if lt == 'x':
-                return lambda x: True
-            elif lt.startswith('[') and lt.endswith(']'):
-                return lambda x: x in lt[1:-1]
-            elif lt.startswith('{') and lt.endswith('}'):
-                return lambda x: x not in lt[1:-1]
-            else:
-                return lambda x: x == lt
-        
-        parts = pattern.split('-')
-        self.matchers = [matcher(x) for x in parts]
 
-        
-    def match(self, string):
-        def matchSt(st, matchers=self.matchers):
-#             print(st)
-            if not matchers: # wszystkie matchery zwróciły true, znaleziono wzrór
-                return True
-            elif st == '':   # nie ma czego sprawdzac
-                return False
-            elif matchers[0](st[0]):  # symbol na obecnej pozycji pasuje do wzoru, sprawdz nastepny
-                return matchSt(st[1:], matchers[1:])
-            else:                     #symbol nie pasuje do wzoru, nie ma dopasowania
-                return False
+def parsePattern(lt):
+    if lt == 'x':
+        return lambda x: True
+    elif lt.startswith('[') and lt.endswith(']'):
+        return lambda x: x in lt[1:-1]
+    elif lt.startswith('{') and lt.endswith('}'):
+        return lambda x: x not in lt[1:-1]
+    else:
+        return lambda x: x == lt
 
-        if string == '':
-            return - float('NaN')
-        elif matchSt(string):   #sprawdz czy string pasuje do wzroru zaczynajac od obecnej pozycji
-            return 0
+
+def createMatcher(pattern):
+    try:
+        patternEnd = pattern.index('(')
+        matcherPattern = pattern[:patternEnd]
+        matcherParams = parseParam(pattern[patternEnd:])
+
+    except ValueError:
+        matcherPattern = pattern
+        matcherParams = (1, 1)
+    return Matcher(parsePattern(matcherPattern), *matcherParams)
+
+
+class Matcher:
+    def __init__(self, matchFunction, minMatches, maxMatches):
+        self.matchFn = matchFunction
+        self.next = None
+        if minMatches is None:
+            self.minMatches = 1
         else:
-            return 1 + self.match(string[1:]) #jesli nie pasuje, to sprawdz nastepna
-        
-    def highlightMatch(self, string):
-        match_start = self.match(string)
-        if isNaN(match_start):
-            print(string)
-            return
-            
-        match_end = match_start + len(self.matchers)
-        output_string = string[:match_start] + bcolors.OKGREEN + string[match_start:match_end] + bcolors.ENDC + string[match_end:]
-        print(output_string)
+            self.minMatches = minMatches
 
-PrositeMatcher('A-x-x-[QWERD]-C-{PDOA}-x-O').highlightMatch('POQAFSFSAQQDCKDOA')
+        if maxMatches is None:
+            self.maxMatches = self.minMatches
+        else:
+            self.maxMatches = maxMatches
+
+    def setNext(self, nextMatcher):
+        self.next = nextMatcher
+
+    def getNext(self):
+        if self.next is None:
+            return LastMatcher()
+        return self.next.copy()
+
+    def copy(self):
+        m = Matcher(self.matchFn, self.minMatches, self.maxMatches)
+        m.setNext(self.next)
+        return m
+
+    def deepCopy(self):
+        m = Matcher(self.matchFn, self.minMatches, self.maxMatches)
+        if self.next is not None:
+            m.setNext(self.next.deepCopy())
+        return m
+
+    def decMatches(self):
+        self.minMatches = max(self.minMatches - 1, 0)
+        self.maxMatches = max(self.maxMatches - 1, 0)
+
+    def match(self, string, i=0):
+        # print(string)
+        if string == '':
+            return []
+
+        if not self.matchFn(string[0]):
+            return []
+
+        self.decMatches()
+
+        if self.minMatches > 0:
+            return self.match(string[1:], i + 1)
+
+        if self.maxMatches > 0:
+            return self.match(string[1:], i + 1) + self.getNext().match(string[1:], i + 1)
+        else:
+            return self.getNext().match(string[1:], i + 1)
+
+
+class LastMatcher:
+    def match(self, string, i):
+        return [i]
+
+
+pt = 'x(1,3)'
+
+links = [createMatcher(p) for p in pt.split('-')]
+
+for i in range(len(links) - 1):
+    links[i].setNext(links[i + 1])
+
+s = 'AAA'
+
+result = []
+for i in range(len(s)):
+    matchPos = links[0].deepCopy().match(s[i:])
+    result += [(i, m + i) for m in set(matchPos)]
+
+print(result)
+for a, b in result:
+    print(s[a:b])
+
